@@ -16,9 +16,10 @@ subprojects {
 
     buildscript {
         repositories {
+            maven{url 'http://maven.aliyun.com/nexus/content/groups/public/'}
+//            maven{url "https://jitpack.io"}
             mavenCentral()
             jcenter()
-            maven { url 'https://jitpack.io' }
         }
         dependencies {
             classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.3'
