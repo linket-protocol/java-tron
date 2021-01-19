@@ -18,6 +18,7 @@
 package org.tron.core.vm.trace;
 
 import java.math.BigInteger;
+import java.util.Date;
 import org.tron.core.vm.OpCode;
 
 public class Op {
@@ -27,6 +28,12 @@ public class Op {
   private int pc;
   private BigInteger energy;
   private OpActions actions;
+
+  private Date time=new Date();
+
+  public Date getTime() {
+    return time;
+  }
 
   public OpCode getCode() {
     return code;

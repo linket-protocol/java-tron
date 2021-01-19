@@ -1,6 +1,7 @@
 package org.tron.core.db2.core;
 
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.collect.Streams;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,8 +24,8 @@ import org.tron.core.exception.ItemNotFoundException;
 
 public class Chainbase implements IRevokingDB {
 
-  // public static Map<String, byte[]> assetsAddress = new HashMap<>(); // key = name , value = address
-  public enum Cursor {
+    // public static Map<String, byte[]> assetsAddress = new HashMap<>(); // key = name , value = address
+    public enum Cursor {
     HEAD,
     SOLIDITY,
     PBFT
@@ -33,36 +34,36 @@ public class Chainbase implements IRevokingDB {
   //true:fullnode, false:soliditynode
   private ThreadLocal<Cursor> cursor = new ThreadLocal<>();
   private ThreadLocal<Long> offset = new ThreadLocal<>();
-  private Snapshot head;
+    private Snapshot head;
 
-  public Chainbase(Snapshot head) {
-    this.head = head;
-    cursor.set(Cursor.HEAD);
+    public Chainbase(Snapshot head) {
+        this.head = head;
+        cursor.set(Cursor.HEAD);
     offset.set(0L);
-  }
+    }
 
-  public String getDbName() {
-    return head.getDbName();
-  }
+    public String getDbName() {
+        return head.getDbName();
+    }
 
-  @Override
-  public void setCursor(Cursor cursor) {
+    @Override
+    public void setCursor(Cursor cursor) {
     this.cursor.set(cursor);
   }
 
   @Override
   public void setCursor(Cursor cursor, long offset) {
-    this.cursor.set(cursor);
+        this.cursor.set(cursor);
     this.offset.set(offset);
-  }
+    }
 
-  private Snapshot head() {
-    if (cursor.get() == null) {
+    private Snapshot head() {
+        if (cursor.get() == null) {
       return head;
     }
 
     switch (cursor.get()) {
-      case HEAD:
+            case HEAD:
         return head;
       case SOLIDITY:
         return head.getSolidity();
@@ -85,65 +86,65 @@ public class Chainbase implements IRevokingDB {
     }
   }
 
-  public synchronized Snapshot getHead() {
-    return head();
-  }
-
-  public synchronized void setHead(Snapshot head) {
-    this.head = head;
-  }
-
-  /**
-   * close the database.
-   */
-  @Override
-  public synchronized void close() {
-    head().close();
-  }
-
-  @Override
-  public synchronized void reset() {
-    head().reset();
-    head().close();
-    head = head.getRoot().newInstance();
-  }
-
-  @Override
-  public synchronized void put(byte[] key, byte[] value) {
-    head().put(key, value);
-  }
-
-  @Override
-  public synchronized void delete(byte[] key) {
-    head().remove(key);
-  }
-
-  @Override
-  public synchronized byte[] get(byte[] key) throws ItemNotFoundException {
-    byte[] value = getUnchecked(key);
-    if (value == null) {
-      throw new ItemNotFoundException();
+    public synchronized Snapshot getHead() {
+        return head();
     }
 
-    return value;
-  }
+    public synchronized void setHead(Snapshot head) {
+        this.head = head;
+    }
 
-  @Override
-  public synchronized byte[] getUnchecked(byte[] key) {
-    return head().get(key);
-  }
+    /**
+     * close the database.
+     */
+    @Override
+    public synchronized void close() {
+        head().close();
+    }
 
-  @Override
-  public synchronized boolean has(byte[] key) {
-    return getUnchecked(key) != null;
-  }
+    @Override
+    public synchronized void reset() {
+        head().reset();
+        head().close();
+        head = head.getRoot().newInstance();
+    }
 
-  @Override
-  public synchronized Iterator<Map.Entry<byte[], byte[]>> iterator() {
-    return head().iterator();
-  }
+    @Override
+    public synchronized void put(byte[] key, byte[] value) {
+        head().put(key, value);
+    }
 
-  @Override
+    @Override
+    public synchronized void delete(byte[] key) {
+        head().remove(key);
+    }
+
+    @Override
+    public synchronized byte[] get(byte[] key) throws ItemNotFoundException {
+        byte[] value = getUnchecked(key);
+        if (value == null) {
+            throw new ItemNotFoundException();
+        }
+
+        return value;
+    }
+
+    @Override
+    public synchronized byte[] getUnchecked(byte[] key) {
+        return head().get(key);
+    }
+
+    @Override
+    public synchronized boolean has(byte[] key) {
+        return getUnchecked(key) != null;
+    }
+
+    @Override
+    public synchronized Iterator<Map.Entry<byte[], byte[]>> iterator() {
+        return head().iterator();
+    }
+
+    @Override
   public Set<byte[]> getValuesNext(byte[] key, long limit) {
     return getValuesNext(head(), key, limit);
   }
@@ -258,74 +259,88 @@ public class Chainbase implements IRevokingDB {
     return getlatestValues(head(), limit);
   }
 
-  // for blockstore
-  private synchronized Set<byte[]> getlatestValues(Snapshot head, long limit) {
-    if (limit <= 0) {
-      return Collections.emptySet();
+    // for blockstore
+    private synchronized Set<byte[]> getlatestValues(Snapshot head, long limit) {
+        if (limit <= 0) {
+            return Collections.emptySet();
+        }
+
+        Set<byte[]> result = new HashSet<>();
+        Snapshot snapshot = head;
+        long tmp = limit;
+        for (; tmp > 0 && snapshot.getPrevious() != null; snapshot = snapshot.getPrevious()) {
+            if (!((SnapshotImpl) snapshot).db.isEmpty()) {
+                --tmp;
+                Streams.stream(((SnapshotImpl) snapshot).db)
+                    .map(Map.Entry::getValue)
+                    .map(Value::getBytes)
+                    .forEach(result::add);
+            }
+        }
+
+        if (snapshot.getPrevious() == null && tmp != 0) {
+            if (((SnapshotRoot) head.getRoot()).db.getClass() == LevelDB.class) {
+                result
+                    .addAll(((LevelDB) ((SnapshotRoot) snapshot).db).getDb().getlatestValues(tmp));
+            } else if (((SnapshotRoot) head.getRoot()).db.getClass() == RocksDB.class) {
+                result
+                    .addAll(((RocksDB) ((SnapshotRoot) snapshot).db).getDb().getlatestValues(tmp));
+            }
+        }
+
+        return result;
     }
 
-    Set<byte[]> result = new HashSet<>();
-    Snapshot snapshot = head;
-    long tmp = limit;
-    for (; tmp > 0 && snapshot.getPrevious() != null; snapshot = snapshot.getPrevious()) {
-      if (!((SnapshotImpl) snapshot).db.isEmpty()) {
-        --tmp;
-        Streams.stream(((SnapshotImpl) snapshot).db)
-            .map(Map.Entry::getValue)
-            .map(Value::getBytes)
-            .forEach(result::add);
-      }
-    }
-
-    if (snapshot.getPrevious() == null && tmp != 0) {
-      if (((SnapshotRoot) head.getRoot()).db.getClass() == LevelDB.class) {
-        result.addAll(((LevelDB) ((SnapshotRoot) snapshot).db).getDb().getlatestValues(tmp));
-      } else if (((SnapshotRoot) head.getRoot()).db.getClass() == RocksDB.class) {
-        result.addAll(((RocksDB) ((SnapshotRoot) snapshot).db).getDb().getlatestValues(tmp));
-      }
-    }
-
-    return result;
-  }
-
-  // for accout-trace
+    // for accout-trace
   @Override
   public Map<byte[], byte[]> getNext(byte[] key, long limit) {
     return getNext(head(), key, limit);
   }
 
   // for accout-trace
-  private Map<byte[], byte[]> getNext(Snapshot head, byte[] key, long limit) {
-    if (limit <= 0) {
-      return Collections.emptyMap();
-    }
+    private Map<byte[], byte[]> getNext(Snapshot head, byte[] key, long limit) {
+        if (limit <= 0) {
+            return Collections.emptyMap();
+        }
 
-    Map<WrappedByteArray, WrappedByteArray> collection = new HashMap<>();
-    if (head.getPrevious() != null) {
-      ((SnapshotImpl) head).collect(collection);
-    }
+        Map<WrappedByteArray, WrappedByteArray> collection = new HashMap<>();
+        if (head.getPrevious() != null) {
+            ((SnapshotImpl) head).collect(collection);
+        }
 
-    Map<WrappedByteArray, WrappedByteArray> levelDBMap = new HashMap<>();
+        Map<WrappedByteArray, WrappedByteArray> levelDBMap = new HashMap<>();
 
-    if (((SnapshotRoot) head.getRoot()).db.getClass() == LevelDB.class) {
-      ((LevelDB) ((SnapshotRoot) head.getRoot()).db).getDb().getNext(key, limit).entrySet().stream()
-          .map(e -> Maps
-              .immutableEntry(WrappedByteArray.of(e.getKey()), WrappedByteArray.of(e.getValue())))
-          .forEach(e -> levelDBMap.put(e.getKey(), e.getValue()));
-    } else if (((SnapshotRoot) head.getRoot()).db.getClass() == RocksDB.class) {
-      ((RocksDB) ((SnapshotRoot) head.getRoot()).db).getDb().getNext(key, limit).entrySet().stream()
-          .map(e -> Maps
-              .immutableEntry(WrappedByteArray.of(e.getKey()), WrappedByteArray.of(e.getValue())))
-          .forEach(e -> levelDBMap.put(e.getKey(), e.getValue()));
-    }
+        if (((SnapshotRoot) head.getRoot()).db.getClass() == LevelDB.class) {
+            ((LevelDB) ((SnapshotRoot) head.getRoot()).db).getDb().getNext(key, limit).entrySet()
+                .stream()
+                .map(e -> Maps
+                    .immutableEntry(WrappedByteArray.of(e.getKey()),
+                        WrappedByteArray.of(e.getValue())))
+                .forEach(e -> levelDBMap.put(e.getKey(), e.getValue()));
+        } else if (((SnapshotRoot) head.getRoot()).db.getClass() == RocksDB.class) {
+            ((RocksDB) ((SnapshotRoot) head.getRoot()).db).getDb().getNext(key, limit).entrySet()
+                .stream()
+                .map(e -> Maps
+                    .immutableEntry(WrappedByteArray.of(e.getKey()),
+                        WrappedByteArray.of(e.getValue())))
+                .forEach(e -> levelDBMap.put(e.getKey(), e.getValue()));
+        }
 
-    levelDBMap.putAll(collection);
+        levelDBMap.putAll(collection);
 
-    return levelDBMap.entrySet().stream()
-        .map(e -> Maps.immutableEntry(e.getKey().getBytes(), e.getValue().getBytes()))
+        return levelDBMap.entrySet().stream()
+            .map(e -> Maps.immutableEntry(e.getKey().getBytes(), e.getValue().getBytes()))
         .sorted((e1, e2) -> ByteUtil.compare(e1.getKey(), e2.getKey()))
-        .filter(e -> ByteUtil.greaterOrEquals(e.getKey(), key))
-        .limit(limit)
-        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-  }
+            .filter(e -> ByteUtil.greaterOrEquals(e.getKey(), key))
+            .limit(limit)
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+  }@Override
+    public Set<byte[]> allKeys() {
+        if (((SnapshotRoot) head.getRoot()).db.getClass() == LevelDB.class) {
+            return ((LevelDB) ((SnapshotRoot) head.getRoot()).db).getDb().allKeys();
+        } else if (((SnapshotRoot) head.getRoot()).db.getClass() == RocksDB.class) {
+            return ((RocksDB) ((SnapshotRoot) head.getRoot()).db).getDb().allKeys();
+        }
+        return Sets.newHashSet();
+    }
 }
