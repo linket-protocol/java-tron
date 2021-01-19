@@ -10,8 +10,10 @@ import static org.tron.core.vm.utils.MUtil.transferToken;
 import com.google.protobuf.ByteString;
 import java.math.BigInteger;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -275,7 +277,7 @@ public class VMActuator implements Actuator2 {
       }
 
       String txHash = Hex.toHexString(rootInternalTransaction.getHash());
-      VMUtils.saveProgramTraceFile(txHash, traceContent);
+      VMUtils.saveProgramTraceFile(txHash+"_"+(new Date()).getTime(), traceContent);
     }
 
   }
