@@ -1194,11 +1194,13 @@ public class Manager {
                         continue;
                     }
                     FilterQuery eventFilter = Args.getInstance().getEventFilter();
-                    if (!eventFilter.checkContractAddress(
+                    if (eventFilter.checkContractAddress(
                         WalletUtil.encode58Check(internalTransaction.getSender()))) {
                         eventFilter.addContractAddress(
                             WalletUtil.encode58Check(internalTransaction.getTransferToAddress()));
-                        logger.info("add eventFilter contract {}",
+                        logger.info("add eventFilter contract {},origin is {},all list is {}",
+                            WalletUtil.encode58Check(internalTransaction.getTransferToAddress()),
+                            WalletUtil.encode58Check(internalTransaction.getSender()),
                             eventFilter.getContractAddressList());
                     }
                 }
@@ -1712,6 +1714,7 @@ public class Manager {
                 || CollectionUtils.isEmpty(rootContractList)) {
                 return;
             }
+
             int i = 0;
             Map<WrappedByteArray, WrappedByteArray> map = getContractStore().allDeployAddress();
             logger.info("init root contract contract size is {}", map.size());
