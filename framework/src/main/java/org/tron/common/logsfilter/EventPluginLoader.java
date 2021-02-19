@@ -18,6 +18,7 @@ import org.spongycastle.util.encoders.Hex;
 import org.springframework.util.StringUtils;
 import org.tron.common.logsfilter.nativequeue.NativeMessageQueue;
 import org.tron.common.logsfilter.trigger.BlockLogTrigger;
+import org.tron.common.logsfilter.trigger.ContractAllLogsTrigger;
 import org.tron.common.logsfilter.trigger.ContractEventTrigger;
 import org.tron.common.logsfilter.trigger.ContractLogTrigger;
 import org.tron.common.logsfilter.trigger.ContractTrigger;
@@ -41,6 +42,8 @@ public class EventPluginLoader {
   private String dbConfig;
 
   private List<TriggerConfig> triggerConfigList;
+
+  private boolean contractAllLogsTriggerEnable = false;
 
   private boolean blockLogTriggerEnable = false;
 
@@ -153,7 +156,7 @@ public class EventPluginLoader {
       hset = new HashSet<>(((ContractEventTrigger) trigger).getTopicMap().values());
     } else if (trigger != null) {
       hset = trigger.getLogInfo().getClonedTopics()
-              .stream().map(Hex::toHexString).collect(Collectors.toSet());
+          .stream().map(Hex::toHexString).collect(Collectors.toSet());
     }
 
     for (String top : topList) {
@@ -238,7 +241,20 @@ public class EventPluginLoader {
   }
 
   private void setSingleTriggerConfig(TriggerConfig triggerConfig) {
-    if (EventPluginConfig.BLOCK_TRIGGER_NAME.equalsIgnoreCase(triggerConfig.getTriggerName())) {
+    if (EventPluginConfig.CONTRACT_ALL_LOGS_TRIGGER_NAME
+        .equalsIgnoreCase(triggerConfig.getTriggerName())) {
+      if (triggerConfig.isEnabled()) {
+        contractAllLogsTriggerEnable = true;
+      } else {
+        contractAllLogsTriggerEnable = false;
+      }
+
+      if (!useNativeQueue) {
+        setPluginTopic(Trigger.CONTRACT_ALL_LOGS_TRIGGER, triggerConfig.getTopic());
+      }
+
+    } else if (EventPluginConfig.BLOCK_TRIGGER_NAME
+        .equalsIgnoreCase(triggerConfig.getTriggerName())) {
       if (triggerConfig.isEnabled()) {
         blockLogTriggerEnable = true;
       } else {
@@ -350,6 +366,10 @@ public class EventPluginLoader {
 
   public synchronized boolean isContractEventTriggerEnable() {
     return contractEventTriggerEnable;
+  }
+
+  public synchronized boolean isContractAllLogsTriggerEnable() {
+    return contractAllLogsTriggerEnable;
   }
 
   public synchronized boolean isContractLogTriggerEnable() {
@@ -467,6 +487,16 @@ public class EventPluginLoader {
     } else {
       eventListeners.forEach(listener ->
           listener.handleContractEventTrigger(toJsonString(trigger)));
+    }
+  }
+
+  public void postContractAllLogsTrigger(ContractAllLogsTrigger trigger) {
+    if (useNativeQueue) {
+      NativeMessageQueue.getInstance()
+          .publishTrigger(toJsonString(trigger), trigger.getTriggerName());
+    } else {
+      eventListeners.forEach(listener ->
+          listener.handleContractAllLogsTrigger(toJsonString(trigger)));
     }
   }
 

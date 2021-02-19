@@ -4,7 +4,6 @@ import static org.tron.common.logsfilter.EventPluginLoader.matchFilter;
 
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
-
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +13,7 @@ import org.spongycastle.util.encoders.Hex;
 import org.tron.common.crypto.Hash;
 import org.tron.common.logsfilter.ContractEventParserAbi;
 import org.tron.common.logsfilter.EventPluginLoader;
+import org.tron.common.logsfilter.trigger.ContractAllLogsTrigger;
 import org.tron.common.logsfilter.trigger.ContractEventTrigger;
 import org.tron.common.logsfilter.trigger.ContractLogTrigger;
 import org.tron.common.logsfilter.trigger.ContractTrigger;
@@ -134,7 +134,11 @@ public class ContractTriggerCapsule extends TriggerCapsule {
         if (EventPluginLoader.getInstance().isSolidityEventTriggerEnable()) {
           Args.getSolidityContractEventTriggerMap().computeIfAbsent(event
               .getBlockNumber(), listBlk -> new LinkedBlockingQueue())
-                  .offer((ContractEventTrigger) event);
+              .offer((ContractEventTrigger) event);
+        }
+        if (EventPluginLoader.getInstance().isContractAllLogsTriggerEnable()) {
+          EventPluginLoader.getInstance()
+              .postContractAllLogsTrigger(new ContractAllLogsTrigger((ContractEventTrigger) event));
         }
 
       } else {
@@ -145,9 +149,14 @@ public class ContractTriggerCapsule extends TriggerCapsule {
         if (EventPluginLoader.getInstance().isSolidityLogTriggerEnable()) {
           Args.getSolidityContractLogTriggerMap().computeIfAbsent(event
               .getBlockNumber(), listBlk -> new LinkedBlockingQueue())
-                  .offer((ContractLogTrigger) event);
+              .offer((ContractLogTrigger) event);
+        }
+        if (EventPluginLoader.getInstance().isContractAllLogsTriggerEnable()) {
+          EventPluginLoader.getInstance()
+              .postContractAllLogsTrigger(new ContractAllLogsTrigger((ContractLogTrigger) event));
         }
       }
+
     }
   }
 }
