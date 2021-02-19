@@ -154,14 +154,14 @@ public class ContractAllLogsTrigger extends Trigger {
     this.eventName = contractEventTrigger.getEventName();
     this.topicMap = contractEventTrigger.getTopicMap();
     this.dataMap = contractEventTrigger.getDataMap();
-    this.logType = LogType.LOG.str;
+    this.logType = LogType.EVENT.str;
     setTriggerName(Trigger.CONTRACT_ALL_LOGS_TRIGGER_NAME);
 
   }
 
   enum LogType {
     LOG("log"),
-    EVENT("evnet");
+    EVENT("event");
     String str;
 
     LogType(String str) {
