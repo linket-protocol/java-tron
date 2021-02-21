@@ -1,5 +1,6 @@
 package org.tron.common.logsfilter.trigger;
 
+import com.alibaba.fastjson.annotation.JSONField;
 import com.google.common.collect.Maps;
 import java.util.HashMap;
 import java.util.List;
@@ -8,110 +9,62 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import lombok.Getter;
 import lombok.Setter;
+import org.tron.common.logsfilter.capsule.RawData;
 
-public class ContractAllLogsTrigger extends Trigger {
+public class ContractAllLogsTrigger extends ContractBasicTrigger {
 
-  /**
-   * unique id of this trigger. $tx_id + "_" + $index
-   */
+  enum LogType {
+    LOG("log"),
+    EVENT("event");
+    String str;
+
+    LogType(String str) {
+      this.str = str;
+    }
+  }
+
   @Getter
   @Setter
-  private String uniqueId;
-
-  @Getter
-  @Setter
+  @JSONField(name = "type")
   private String logType;
-
-  /**
-   * id of the transaction which produce this event.
-   */
-  @Getter
-  @Setter
-  private String transactionId;
-
-  /**
-   * address of the contract triggered by the callerAddress.
-   */
-  @Getter
-  @Setter
-  private String contractAddress;
-
-  /**
-   * caller of the transaction which produce this event.
-   */
-  @Getter
-  @Setter
-  private String callerAddress;
-
-  /**
-   * origin address of the contract which produce this event.
-   */
-  @Getter
-  @Setter
-  private String originAddress;
-
-  /**
-   * caller address of the contract which produce this event.
-   */
-  @Getter
-  @Setter
-  private String creatorAddress;
-
-  /**
-   * block number of the transaction
-   */
-  @Getter
-  @Setter
-  private Long blockNumber;
-
-  /**
-   * true if the transaction has been revoked
-   */
-  @Getter
-  @Setter
-  private boolean removed;
-
-  @Getter
-  @Setter
-  private long latestSolidifiedBlockNumber;
-
 
   /**
    * decode from sha3($EventSignature) with the ABI of this contract.
    */
   @Getter
   @Setter
+  @JSONField(name = "sign")
   private String eventSignature;
 
   @Getter
   @Setter
+  @JSONField(name = "sign_full")
   private String eventSignatureFull;
 
   @Getter
   @Setter
+  @JSONField(name = "event")
   private String eventName;
 
-  /**
-   * decode from topicList with the ABI of this contract. this item is null if not called
-   * ContractEventParserAbi::parseTopics(ContractEventTrigger trigger)
-   */
   @Getter
   @Setter
-  private Map<String, String> topicMap;
+  private RawData rawData;
 
-  /**
-   * multi data items will be concat into a single string. this item is null if not called
-   * ContractEventParserAbi::parseData(ContractEventTrigger trigger)
-   */
-  @Getter
-  @Setter
-  private Map<String, String> dataMap;
-
-
-  public ContractAllLogsTrigger() {
-    super();
-    setTriggerName(Trigger.CONTRACT_ALL_LOGS_TRIGGER_NAME);
-  }
+//  /**
+//   * decode from topicList with the ABI of this contract. this item is null if not called
+//   * ContractEventParserAbi::parseTopics(ContractEventTrigger trigger)
+//   */
+//  @Getter
+//  @Setter
+//  private Map<String, String> topicMap;
+//
+//  /**
+//   * multi data items will be concat into a single string. this item is null if not called
+//   * ContractEventParserAbi::parseData(ContractEventTrigger trigger)
+//   */
+//  @Getter
+//  @Setter
+//  private Map<String, String> dataMap;
 
   public ContractAllLogsTrigger(ContractLogTrigger contractLogTrigger) {
     this.timeStamp = contractLogTrigger.timeStamp;
@@ -128,11 +81,12 @@ public class ContractAllLogsTrigger extends Trigger {
     this.eventSignatureFull = contractLogTrigger.getTriggerName();
     this.eventName = contractLogTrigger.getTriggerName();
     List<String> topicList = contractLogTrigger.getTopicList();
-    this.topicMap = IntStream.range(0, topicList.size()).boxed().collect(Collectors
-        .toMap(String::valueOf, i -> topicList.get(i), (a, b) -> b, Maps::newHashMap));
-    HashMap<String, String> data = Maps.newHashMap();
-    data.put("0", contractLogTrigger.getData());
-    this.dataMap = data;
+    this.rawData = contractLogTrigger.getRawData();
+//    this.topicMap = IntStream.range(0, topicList.size()).boxed().collect(Collectors
+//        .toMap(String::valueOf, i -> topicList.get(i), (a, b) -> b, Maps::newHashMap));
+//    HashMap<String, String> data = Maps.newHashMap();
+//    data.put("0", contractLogTrigger.getData());
+//    this.dataMap = data;
     this.logType = LogType.LOG.str;
     setTriggerName(Trigger.CONTRACT_ALL_LOGS_TRIGGER_NAME);
 
@@ -152,20 +106,11 @@ public class ContractAllLogsTrigger extends Trigger {
     this.eventSignature = contractEventTrigger.getEventSignature();
     this.eventSignatureFull = contractEventTrigger.getEventSignatureFull();
     this.eventName = contractEventTrigger.getEventName();
-    this.topicMap = contractEventTrigger.getTopicMap();
-    this.dataMap = contractEventTrigger.getDataMap();
+    this.rawData = contractEventTrigger.getRawData();
+//    this.topicMap = contractEventTrigger.getTopicMap();
+//    this.dataMap = contractEventTrigger.getDataMap();
     this.logType = LogType.EVENT.str;
     setTriggerName(Trigger.CONTRACT_ALL_LOGS_TRIGGER_NAME);
 
-  }
-
-  enum LogType {
-    LOG("log"),
-    EVENT("event");
-    String str;
-
-    LogType(String str) {
-      this.str = str;
-    }
   }
 }

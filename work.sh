@@ -16,15 +16,15 @@ fi
 # Increase memory limit that JVM can use to avoid OOM error:
 # 80% of your physical memory may be a proper ceiling that JVM can use.
 # By default there, JVM initializes with 1g memory and can use 32g at most.
-JVM_OPTIONS="-Xms1g -Xmx32g"
+JVM_OPTIONS="-Xms1g -Xmx4g"
 
-JAR_FILE_PATH="./build/libs/java-tron.jar"
+JAR_FILE_PATH="/tron/java-tron/FullNode.jar"
 PID_FILE_PATH="java-tron.pid"
 LOG_FILE_PATH="java-tron.log"
 
-CONF_FILE_PATH="./build/resources/main/config.conf"
+CONF_FILE_PATH="/tron/java-tron/config.conf"
 
-PRIVATE_KEY="650950B193DDDDB35B6E48912DD28F7AB0E7140C1BFDEFD493348F02295BD812"
+PRIVATE_KEY="B2431C4F9CC488FFB03C3D1E4B47ED4993683E64C6322E9A48ED3EB2F405D985"
 
 case "${1}" in
     start)
