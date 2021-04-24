@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import lombok.Getter;
@@ -76,12 +77,12 @@ public class Args extends CommonParameter {
 
   @Autowired(required = false)
   @Getter
-  private static ConcurrentHashMap<Long, List<ContractLogTrigger>>
+  private static ConcurrentHashMap<Long, BlockingQueue<ContractLogTrigger>>
       solidityContractLogTriggerMap = new ConcurrentHashMap<>();
 
   @Autowired(required = false)
   @Getter
-  private static ConcurrentHashMap<Long, List<ContractEventTrigger>>
+  private static ConcurrentHashMap<Long, BlockingQueue<ContractEventTrigger>>
       solidityContractEventTriggerMap = new ConcurrentHashMap<>();
 
   public static void clearParam() {
@@ -178,9 +179,14 @@ public class Args extends CommonParameter {
     PARAMETER.allowPBFT = 0;
     PARAMETER.allowShieldedTRC20Transaction = 0;
     PARAMETER.allowMarketTransaction = 0;
+    PARAMETER.allowTransactionFeePool = 0;
+    PARAMETER.allowBlackHoleOptimization = 0;
     PARAMETER.allowTvmIstanbul = 0;
     PARAMETER.allowTvmStake = 0;
     PARAMETER.allowTvmAssetIssue = 0;
+    PARAMETER.historyBalanceLookup = false;
+    PARAMETER.openPrintLog = true;
+    PARAMETER.openTransactionSort = false;
   }
 
   /**
@@ -624,6 +630,15 @@ public class Args extends CommonParameter {
         config.hasPath(Constant.COMMITTEE_ALLOW_MARKET_TRANSACTION) ? config
             .getInt(Constant.COMMITTEE_ALLOW_MARKET_TRANSACTION) : 0;
 
+
+    PARAMETER.allowTransactionFeePool =
+        config.hasPath(Constant.COMMITTEE_ALLOW_TRANSACTION_FEE_POOL) ? config
+            .getInt(Constant.COMMITTEE_ALLOW_TRANSACTION_FEE_POOL) : 0;
+
+    PARAMETER.allowBlackHoleOptimization =
+        config.hasPath(Constant.COMMITTEE_ALLOW_BLACK_HOLE_OPTIMIZATION) ? config
+            .getInt(Constant.COMMITTEE_ALLOW_BLACK_HOLE_OPTIMIZATION) : 0;
+
     PARAMETER.allowTvmIstanbul =
         config.hasPath(Constant.COMMITTEE_ALLOW_TVM_ISTANBUL) ? config
             .getInt(Constant.COMMITTEE_ALLOW_TVM_ISTANBUL) : 0;
@@ -727,6 +742,14 @@ public class Args extends CommonParameter {
     PARAMETER.setOpenHistoryQueryWhenLiteFN(
             config.hasPath(Constant.NODE_OPEN_HISTORY_QUERY_WHEN_LITEFN)
                     && config.getBoolean(Constant.NODE_OPEN_HISTORY_QUERY_WHEN_LITEFN));
+
+    PARAMETER.historyBalanceLookup = config.hasPath(Constant.HISTORY_BALANCE_LOOKUP) && config
+        .getBoolean(Constant.HISTORY_BALANCE_LOOKUP);
+
+    PARAMETER.openPrintLog = config.hasPath(Constant.OPEN_PRINT_LOG) && config
+        .getBoolean(Constant.OPEN_PRINT_LOG);
+    PARAMETER.openTransactionSort = config.hasPath(Constant.OPEN_TRANSACTION_SORT) && config
+        .getBoolean(Constant.OPEN_TRANSACTION_SORT);
 
     logConfig();
   }
@@ -899,9 +922,15 @@ public class Args extends CommonParameter {
     filter.setToBlock(toBlockLong);
 
     List<String> addressList = config.getStringList(Constant.EVENT_SUBSCRIBE_CONTRACT_ADDRESS);
-    addressList = addressList.stream().filter(address -> StringUtils.isNotEmpty(address)).collect(
-        Collectors.toList());
+    List<String> rootContractList = config.getStringList(Constant.EVENT_SUBSCRIBE_ROOT_CONTRACT)
+        .stream().filter(StringUtils::isNotEmpty).collect(Collectors.toList());
+
+    addressList = addressList.stream().filter(StringUtils::isNotEmpty)
+        .collect(Collectors.toList());
     filter.setContractAddressList(addressList);
+    filter.setRootContractList(rootContractList);
+    filter.setRootContractInitTimes(
+        config.getLong(Constant.EVENT_SUBSCRIBE_ROOT_CONTRACT_INIT_TIMES));
 
     List<String> topicList = config.getStringList(Constant.EVENT_SUBSCRIBE_CONTRACT_TOPIC);
     topicList = topicList.stream().filter(top -> StringUtils.isNotEmpty(top)).collect(

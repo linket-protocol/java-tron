@@ -1,6 +1,8 @@
 package org.tron.core.db;
 
 import static org.tron.common.utils.Commons.adjustBalance;
+import static org.tron.protos.Protocol.Transaction.Contract.ContractType.TransferContract;
+import static org.tron.protos.Protocol.Transaction.Result.contractResult;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -12,16 +14,8 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -30,9 +24,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import javax.annotation.PostConstruct;
@@ -57,11 +53,9 @@ import org.tron.common.logsfilter.trigger.ContractTrigger;
 import org.tron.common.logsfilter.trigger.Trigger;
 import org.tron.common.overlay.message.Message;
 import org.tron.common.parameter.CommonParameter;
+import org.tron.common.runtime.InternalTransaction;
 import org.tron.common.runtime.RuntimeImpl;
-import org.tron.common.utils.ByteArray;
-import org.tron.common.utils.Pair;
-import org.tron.common.utils.SessionOptional;
-import org.tron.common.utils.Sha256Hash;
+import org.tron.common.utils.*;
 import org.tron.common.zksnark.MerkleContainer;
 import org.tron.consensus.Consensus;
 import org.tron.consensus.base.Param.Miner;
@@ -69,6 +63,7 @@ import org.tron.core.ChainBaseManager;
 import org.tron.core.Constant;
 import org.tron.core.actuator.ActuatorCreator;
 import org.tron.core.capsule.AccountCapsule;
+import org.tron.core.capsule.BlockBalanceTraceCapsule;
 import org.tron.core.capsule.BlockCapsule;
 import org.tron.core.capsule.BlockCapsule.BlockId;
 import org.tron.core.capsule.BytesCapsule;
@@ -85,6 +80,7 @@ import org.tron.core.db.accountstate.TrieService;
 import org.tron.core.db.accountstate.callback.AccountStateCallBack;
 import org.tron.core.db.api.AssetUpdateHelper;
 import org.tron.core.db2.ISession;
+import org.tron.core.db2.common.WrappedByteArray;
 import org.tron.core.db2.core.Chainbase;
 import org.tron.core.db2.core.ITronChainBase;
 import org.tron.core.db2.core.SnapshotManager;
@@ -139,10 +135,8 @@ import org.tron.core.utils.TransactionRegister;
 import org.tron.protos.Protocol.AccountType;
 import org.tron.protos.Protocol.Transaction;
 import org.tron.protos.Protocol.Transaction.Contract;
-import org.tron.protos.Protocol.Transaction.Contract.ContractType;
-import org.tron.protos.Protocol.Transaction.Result;
-import org.tron.protos.Protocol.Transaction.Result.contractResult;
 import org.tron.protos.Protocol.TransactionInfo;
+import org.tron.protos.contract.BalanceContract;
 
 
 @Slf4j(topic = "DB")
@@ -204,7 +198,7 @@ public class Manager {
   @Getter
   private ChainBaseManager chainBaseManager;
   // transactions cache
-  private List<TransactionCapsule> pendingTransactions;
+  private BlockingQueue<TransactionCapsule> pendingTransactions;
   @Getter
   private AtomicInteger shieldedTransInPendingCounts = new AtomicInteger(0);
   // transactions popped
@@ -223,7 +217,10 @@ public class Manager {
           TransactionCapsule tx = null;
           try {
             tx = getRePushTransactions().peek();
-            if (tx != null) {
+            if (tx != null && System.currentTimeMillis() - tx.getTime() >= Args.getInstance()
+                .getPendingTransactionTimeout()) {
+              logger.warn("[timeout] remove tx from rePush, txId:{}", tx.getTransactionId());
+            } else if (tx != null) {
               this.rePush(tx);
             } else {
               TimeUnit.MILLISECONDS.sleep(SLEEP_TIME_OUT);
@@ -318,7 +315,7 @@ public class Manager {
     return chainBaseManager.getBlockIndexStore();
   }
 
-  public List<TransactionCapsule> getPendingTransactions() {
+  public BlockingQueue<TransactionCapsule> getPendingTransactions() {
     return this.pendingTransactions;
   }
 
@@ -338,6 +335,9 @@ public class Manager {
     isRunTriggerCapsuleProcessThread = false;
   }
 
+  private Comparator downComparator = (Comparator<TransactionCapsule>) (o1, o2) -> Long
+      .compare(o2.getOrder(), o1.getOrder());
+
   @PostConstruct
   public void init() {
     Message.setDynamicPropertiesStore(this.getDynamicPropertiesStore());
@@ -352,8 +352,13 @@ public class Manager {
     this.setMerkleContainer(
         merkleContainer.createInstance(chainBaseManager.getMerkleTreeStore(),
             chainBaseManager.getMerkleTreeIndexStore()));
-    this.pendingTransactions = Collections.synchronizedList(Lists.newArrayList());
-    this.rePushTransactions = new LinkedBlockingQueue<>();
+    if (Args.getInstance().isOpenTransactionSort()) {
+      this.pendingTransactions = new PriorityBlockingQueue(2000, downComparator);
+      this.rePushTransactions = new PriorityBlockingQueue<>(2000, downComparator);
+    } else {
+      this.pendingTransactions = new LinkedBlockingQueue<>();
+      this.rePushTransactions = new LinkedBlockingQueue<>();
+    }
     this.triggerCapsuleQueue = new LinkedBlockingQueue<>();
     chainBaseManager.setMerkleContainer(getMerkleContainer());
     chainBaseManager.setMortgageService(mortgageService);
@@ -440,6 +445,7 @@ public class Manager {
         this.initWitness();
         this.khaosDb.start(genesisBlock);
         this.updateRecentBlock(genesisBlock);
+        initAccountHistoryBalance();
       }
     }
   }
@@ -465,6 +471,37 @@ public class Manager {
               chainBaseManager.getAccountIdIndexStore().put(accountCapsule);
               chainBaseManager.getAccountIndexStore().put(accountCapsule);
             });
+  }
+
+  public void initAccountHistoryBalance() {
+    BlockCapsule genesis = chainBaseManager.getGenesisBlock();
+    BlockBalanceTraceCapsule genesisBlockBalanceTraceCapsule =
+        new BlockBalanceTraceCapsule(genesis);
+    List<TransactionCapsule> transactionCapsules = genesis.getTransactions();
+    for (TransactionCapsule transactionCapsule : transactionCapsules) {
+      BalanceContract.TransferContract transferContract = transactionCapsule.getTransferContract();
+      BalanceContract.TransactionBalanceTrace.Operation operation =
+          BalanceContract.TransactionBalanceTrace.Operation.newBuilder()
+              .setOperationIdentifier(0)
+              .setAddress(transferContract.getToAddress())
+              .setAmount(transferContract.getAmount())
+              .build();
+
+      BalanceContract.TransactionBalanceTrace transactionBalanceTrace =
+          BalanceContract.TransactionBalanceTrace.newBuilder()
+              .setTransactionIdentifier(transactionCapsule.getTransactionId().getByteString())
+              .setType(TransferContract.name())
+              .setStatus(contractResult.SUCCESS.name())
+              .addOperation(operation)
+              .build();
+      genesisBlockBalanceTraceCapsule.addTransactionBalanceTrace(transactionBalanceTrace);
+
+      chainBaseManager.getAccountTraceStore().recordBalanceWithBlock(
+          transferContract.getToAddress().toByteArray(), 0, transferContract.getAmount());
+    }
+
+    chainBaseManager.getBalanceTraceStore()
+        .put(Longs.toByteArray(0), genesisBlockBalanceTraceCapsule);
   }
 
   /**
@@ -614,12 +651,17 @@ public class Manager {
   }
 
   private boolean containsTransaction(TransactionCapsule transactionCapsule) {
+    return containsTransaction(transactionCapsule.getTransactionId().getBytes());
+  }
+
+
+  private boolean containsTransaction(byte[] transactionId) {
     if (transactionCache != null) {
-      return transactionCache.has(transactionCapsule.getTransactionId().getBytes());
+      return transactionCache.has(transactionId);
     }
 
     return chainBaseManager.getTransactionStore()
-        .has(transactionCapsule.getTransactionId().getBytes());
+        .has(transactionId);
   }
 
   /**
@@ -680,8 +722,12 @@ public class Manager {
         try {
           if (accountCapsule != null) {
             adjustBalance(getAccountStore(), accountCapsule, -fee);
-            adjustBalance(getAccountStore(), this.getAccountStore()
-                .getBlackhole().createDbKey(), +fee);
+
+            if (getDynamicPropertiesStore().supportBlackHoleOptimization()) {
+              getDynamicPropertiesStore().burnTrx(fee);
+            } else {
+              adjustBalance(getAccountStore(), this.getAccountStore().getBlackhole(), +fee);
+            }
           }
         } catch (BalanceInsufficientException e) {
           throw new AccountResourceInsufficientException(
@@ -1067,6 +1113,10 @@ public class Manager {
       return null;
     }
 
+    if (Objects.nonNull(blockCap)) {
+      chainBaseManager.getBalanceTraceStore().initCurrentTransactionBalanceTrace(trxCap);
+    }
+
     validateTapos(trxCap);
     validateCommon(trxCap);
 
@@ -1113,6 +1163,22 @@ public class Manager {
     trace.finalization();
     if (Objects.nonNull(blockCap) && getDynamicPropertiesStore().supportVM()) {
       trxCap.setResult(trace.getTransactionContext());
+      if (trxCap.getContractRet().equals(contractResult.SUCCESS) && Args.getInstance()
+          .isEventSubscribe()) {
+        for (InternalTransaction internalTransaction : trace.getRuntimeResult()
+            .getInternalTransactions()) {
+          if (!internalTransaction.getNote().equals("create")) {
+            continue;
+          }
+          FilterQuery eventFilter = Args.getInstance().getEventFilter();
+          if (!eventFilter.checkContractAddress(
+              WalletUtil.encode58Check(internalTransaction.getSender()))) {
+            eventFilter.addContractAddress(
+                WalletUtil.encode58Check(internalTransaction.getReceiveAddress()));
+          }
+        }
+
+      }
     }
     chainBaseManager.getTransactionStore().put(trxCap.getTransactionId().getBytes(), trxCap);
 
@@ -1130,6 +1196,14 @@ public class Manager {
       ownerAddressSet.add(ByteArray.toHexString(TransactionCapsule.getOwner(contract)));
     }
 
+    if (Objects.nonNull(blockCap)) {
+      chainBaseManager.getBalanceTraceStore()
+          .updateCurrentTransactionStatus(
+              trace.getRuntimeResult().getResultCode().name());
+      chainBaseManager.getBalanceTraceStore().resetCurrentTransactionTrace();
+    }
+    //set the sort order
+    trxCap.setOrder(transactionInfo.getFee());
     return transactionInfo.getInstance();
   }
 
@@ -1163,13 +1237,21 @@ public class Manager {
 
     Set<String> accountSet = new HashSet<>();
     AtomicInteger shieldedTransCounts = new AtomicInteger(0);
-    Iterator<TransactionCapsule> iterator = pendingTransactions.iterator();
-    while (iterator.hasNext() || rePushTransactions.size() > 0) {
+    while (pendingTransactions.size() > 0 || rePushTransactions.size() > 0) {
       boolean fromPending = false;
       TransactionCapsule trx;
-      if (iterator.hasNext()) {
-        fromPending = true;
-        trx = iterator.next();
+      if (pendingTransactions.size() > 0) {
+        trx = pendingTransactions.peek();
+        if (Args.getInstance().isOpenTransactionSort()) {
+          TransactionCapsule trxRepush = rePushTransactions.peek();
+          if (trxRepush == null || trx.getOrder() >= trxRepush.getOrder()) {
+            fromPending = true;
+          } else {
+            trx = rePushTransactions.poll();
+          }
+        } else {
+          fromPending = true;
+        }
       } else {
         trx = rePushTransactions.poll();
       }
@@ -1215,10 +1297,11 @@ public class Manager {
           transactionRetCapsule.addTransactionInfo(result);
         }
         if (fromPending) {
-          iterator.remove();
+          pendingTransactions.poll();
         }
       } catch (Exception e) {
-        logger.error("Process trx failed when generating block: {}", e.getMessage());
+        logger.error("Process trx {} failed when generating block: {}", trx.getTransactionId(),
+            e.getMessage());
       }
     }
 
@@ -1298,6 +1381,9 @@ public class Manager {
     if (!consensus.validBlock(block)) {
       throw new ValidateScheduleException("validateWitnessSchedule error");
     }
+
+    chainBaseManager.getBalanceTraceStore().initCurrentBlockBalanceTrace(block);
+
     //reset BlockEnergyUsage
     chainBaseManager.getDynamicPropertiesStore().saveBlockEnergyUsage(0);
     //parallel check sign
@@ -1355,6 +1441,8 @@ public class Manager {
     updateTransHashCache(block);
     updateRecentBlock(block);
     updateDynamicProperties(block);
+
+    chainBaseManager.getBalanceTraceStore().resetCurrentBlockTrace();
   }
 
   private void payReward(BlockCapsule block) {
@@ -1365,11 +1453,33 @@ public class Manager {
       mortgageService.payBlockReward(witnessCapsule.getAddress().toByteArray(),
           getDynamicPropertiesStore().getWitnessPayPerBlock());
       mortgageService.payStandbyWitness();
+
+      if (chainBaseManager.getDynamicPropertiesStore().supportTransactionFeePool()) {
+        long transactionFeeReward = Math
+            .floorDiv(chainBaseManager.getDynamicPropertiesStore().getTransactionFeePool(),
+                Constant.TRANSACTION_FEE_POOL_PERIOD);
+        mortgageService.payTransactionFeeReward(witnessCapsule.getAddress().toByteArray(),
+            transactionFeeReward);
+        chainBaseManager.getDynamicPropertiesStore().saveTransactionFeePool(
+            chainBaseManager.getDynamicPropertiesStore().getTransactionFeePool()
+                - transactionFeeReward);
+      }
     } else {
       byte[] witness = block.getWitnessAddress().toByteArray();
       AccountCapsule account = getAccountStore().get(witness);
       account.setAllowance(account.getAllowance()
           + chainBaseManager.getDynamicPropertiesStore().getWitnessPayPerBlock());
+
+      if (chainBaseManager.getDynamicPropertiesStore().supportTransactionFeePool()) {
+        long transactionFeeReward = Math
+            .floorDiv(chainBaseManager.getDynamicPropertiesStore().getTransactionFeePool(),
+                Constant.TRANSACTION_FEE_POOL_PERIOD);
+        account.setAllowance(account.getAllowance() + transactionFeeReward);
+        chainBaseManager.getDynamicPropertiesStore().saveTransactionFeePool(
+            chainBaseManager.getDynamicPropertiesStore().getTransactionFeePool()
+                - transactionFeeReward);
+      }
+
       getAccountStore().put(account.createDbKey(), account);
     }
   }
@@ -1378,12 +1488,17 @@ public class Manager {
     if (blockNum > lastSolidityNum) {
       return;
     }
-    for (ContractLogTrigger logTriggerCapsule : Args
-        .getSolidityContractLogTriggerMap().get(blockNum)) {
-      if (chainBaseManager.getTransactionStore().getUnchecked(ByteArray.fromHexString(
-          logTriggerCapsule.getTransactionId())) != null) {
-        logTriggerCapsule.setTriggerName(Trigger.SOLIDITYLOG_TRIGGER_NAME);
-        EventPluginLoader.getInstance().postSolidityLogTrigger(logTriggerCapsule);
+    BlockingQueue contractLogTriggersQueue = Args.getSolidityContractLogTriggerMap()
+        .get(blockNum);
+    while (!contractLogTriggersQueue.isEmpty()) {
+      ContractLogTrigger triggerCapsule = (ContractLogTrigger) contractLogTriggersQueue.poll();
+      if (triggerCapsule == null) {
+        break;
+      }
+      if (containsTransaction(ByteArray.fromHexString(triggerCapsule
+          .getTransactionId()))) {
+        triggerCapsule.setTriggerName(Trigger.SOLIDITYLOG_TRIGGER_NAME);
+        EventPluginLoader.getInstance().postSolidityLogTrigger(triggerCapsule);
       }
     }
     Args.getSolidityContractLogTriggerMap().remove(blockNum);
@@ -1393,13 +1508,18 @@ public class Manager {
     if (blockNum > lastSolidityNum) {
       return;
     }
-    for (ContractEventTrigger eventTriggerCapsule : Args
-        .getSolidityContractEventTriggerMap().get(blockNum)) {
-      if (chainBaseManager.getTransactionStore()
-          .getUnchecked(ByteArray.fromHexString(eventTriggerCapsule
-              .getTransactionId())) != null) {
-        eventTriggerCapsule.setTriggerName(Trigger.SOLIDITYEVENT_TRIGGER_NAME);
-        EventPluginLoader.getInstance().postSolidityEventTrigger(eventTriggerCapsule);
+    BlockingQueue contractEventTriggersQueue = Args.getSolidityContractEventTriggerMap()
+        .get(blockNum);
+    while (!contractEventTriggersQueue.isEmpty()) {
+      ContractEventTrigger triggerCapsule = (ContractEventTrigger) contractEventTriggersQueue
+          .poll();
+      if (triggerCapsule == null) {
+        break;
+      }
+      if (containsTransaction(ByteArray.fromHexString(triggerCapsule
+          .getTransactionId()))) {
+        triggerCapsule.setTriggerName(Trigger.SOLIDITYEVENT_TRIGGER_NAME);
+        EventPluginLoader.getInstance().postSolidityEventTrigger(triggerCapsule);
       }
     }
     Args.getSolidityContractEventTriggerMap().remove(blockNum);
@@ -1549,7 +1669,7 @@ public class Manager {
   }
 
   private void startEventSubscribing() {
-
+    logger.info("startEventSubscribing starting");
     try {
       eventPluginLoaded = EventPluginLoader.getInstance()
           .start(Args.getInstance().getEventPluginConfig());
@@ -1559,12 +1679,32 @@ public class Manager {
       }
 
       FilterQuery eventFilter = Args.getInstance().getEventFilter();
-      if (!Objects.isNull(eventFilter)) {
-        EventPluginLoader.getInstance().setFilterQuery(eventFilter);
+      if (Objects.isNull(eventFilter)) {
+        logger.error("failed to load eventFilter from config file");
+        return;
       }
-
+      EventPluginLoader.getInstance().setFilterQuery(eventFilter);
+      List<String> rootContractList = eventFilter.getRootContractList();
+      if (eventFilter.getRootContractInitTimes() < 0
+          || CollectionUtils.isEmpty(rootContractList)) {
+        return;
+      }
+      int i = 0;
+      Map<WrappedByteArray, WrappedByteArray> map = getContractStore().allDeployAddress();
+      do {
+        map.forEach((key, value) -> {
+          String origin = WalletUtil.encode58Check(value.getBytes());
+          String contract = WalletUtil.encode58Check(key.getBytes());
+          if (rootContractList.contains(origin) && !rootContractList.contains(contract)) {
+            rootContractList.add(contract);
+          }
+        });
+      } while (i++ < eventFilter.getRootContractInitTimes());
+      rootContractList.addAll(eventFilter.getContractAddressList());
+      eventFilter.setContractAddressList(rootContractList);
+      logger.info("init root contract list is {}", rootContractList.toString());
     } catch (Exception e) {
-      logger.error("{}", e);
+      logger.error("error init root contract list is {}", e);
     }
   }
 
@@ -1687,5 +1827,43 @@ public class Manager {
       }
       return true;
     }
+  }
+
+  public TransactionCapsule getTxFromPending(String txId) {
+    AtomicReference<TransactionCapsule> transactionCapsule = new AtomicReference<>();
+    Sha256Hash txHash = Sha256Hash.wrap(ByteArray.fromHexString(txId));
+    pendingTransactions.forEach(tx -> {
+      if (tx.getTransactionId().equals(txHash)) {
+        transactionCapsule.set(tx);
+        return;
+      }
+    });
+    if (transactionCapsule.get() != null) {
+      return transactionCapsule.get();
+    }
+    rePushTransactions.forEach(tx -> {
+      if (tx.getTransactionId().equals(txHash)) {
+        transactionCapsule.set(tx);
+        return;
+      }
+    });
+    return transactionCapsule.get();
+  }
+
+  public Collection<String> getTxListFromPending() {
+    Set<String> result = new HashSet<>();
+    pendingTransactions.forEach(tx -> {
+      result.add(tx.getTransactionId().toString());
+    });
+    rePushTransactions.forEach(tx -> {
+      result.add(tx.getTransactionId().toString());
+    });
+    return result;
+  }
+
+  public long getPendingSize() {
+    long value = getPendingTransactions().size() + getRePushTransactions().size()
+        + getPoppedTransactions().size();
+    return value;
   }
 }

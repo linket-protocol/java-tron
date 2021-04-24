@@ -73,6 +73,9 @@ public class TransactionTrace {
   @Getter
   @Setter
   private TimeResultType timeResultType = TimeResultType.NORMAL;
+  @Getter
+  @Setter
+  private boolean netFeeForBandwidth = true;
 
   public TransactionTrace(TransactionCapsule trx, StoreFactory storeFactory,
       Runtime runtime) {
@@ -162,6 +165,12 @@ public class TransactionTrace {
     receipt.setNetFee(netFee);
   }
 
+  public void setNetBillForCreateNewAccount(long netUsage, long netFee) {
+    receipt.setNetUsage(netUsage);
+    receipt.setNetFee(netFee);
+    setNetFeeForBandwidth(false);
+  }
+
   public void addNetBill(long netFee) {
     receipt.addNetFee(netFee);
   }
@@ -172,16 +181,17 @@ public class TransactionTrace {
     runtime.execute(transactionContext);
     setBill(transactionContext.getProgramResult().getEnergyUsed());
 
-    if (TrxType.TRX_PRECOMPILED_TYPE != trxType) {
-      if (contractResult.OUT_OF_TIME
-          .equals(receipt.getResult())) {
-        setTimeResultType(TimeResultType.OUT_OF_TIME);
-      } else if (System.currentTimeMillis() - txStartTimeInMs
-          > CommonParameter.getInstance()
-          .getLongRunningTime()) {
-        setTimeResultType(TimeResultType.LONG_RUNNING);
-      }
-    }
+    // FIXME: who delete this?
+//    if (TrxType.TRX_PRECOMPILED_TYPE != trxType) {
+//      if (contractResult.OUT_OF_TIME
+//          .equals(receipt.getResult())) {
+//        setTimeResultType(TimeResultType.OUT_OF_TIME);
+//      } else if (System.currentTimeMillis() - txStartTimeInMs
+//          > CommonParameter.getInstance()
+//          .getLongRunningTime()) {
+//        setTimeResultType(TimeResultType.LONG_RUNNING);
+//      }
+//    }
   }
 
   public void finalization() throws ContractExeException {
