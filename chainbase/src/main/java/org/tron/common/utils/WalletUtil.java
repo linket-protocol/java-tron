@@ -49,6 +49,13 @@ public class WalletUtil {
 
     }
 
+
+    // for `CREATE2`
+    public static byte[] generateContractAddress2(byte[] address, byte[] salt, byte[] code) {
+        byte[] mergedData = ByteUtil.merge(address, salt, Hash.sha3(code));
+        return Hash.sha3omit12(mergedData);
+    }
+
     // for `CREATE`
     public static byte[] generateContractAddress(byte[] transactionRootId, long nonce) {
         byte[] nonceBytes = Longs.toByteArray(nonce);
@@ -67,12 +74,6 @@ public class WalletUtil {
         System.arraycopy(input, 0, inputCheck, 0, input.length);
         System.arraycopy(hash1, 0, inputCheck, input.length, 4);
         return Base58.encode(inputCheck);
-    }
-
-    // for `CREATE2`
-    public static byte[] generateContractAddress2(byte[] address, byte[] salt, byte[] code) {
-        byte[] mergedData = ByteUtil.merge(address, salt, Hash.sha3(code));
-        return Hash.sha3omit12(mergedData);
     }
 
     public static boolean isConstant(ABI abi, TriggerSmartContract triggerSmartContract)

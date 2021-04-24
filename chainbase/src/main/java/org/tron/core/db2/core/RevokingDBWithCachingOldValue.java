@@ -59,10 +59,11 @@ public class RevokingDBWithCachingOldValue implements IRevokingDB {
         if (Objects.isNull(key) || Objects.isNull(newValue)) {
             return;
         }
+
         byte[] value = dbSource.getData(key);
-    if (ArrayUtils.isNotEmpty(value)) {
-      onModify(key, value);
-    }
+        if (ArrayUtils.isNotEmpty(value)) {
+            onModify(key, value);
+        }
 
         dbSource.putData(key, newValue);
 
